@@ -1,0 +1,81 @@
+import streamlit as st
+import cv2
+import numpy as np
+import mediapipe as mp
+import imagehash
+from PIL import Image
+import sqlite3
+import tempfile
+
+# Initialize MediaPipe Face Mesh
+mp_face_mesh = mp.solutions.face_mesh
+face_mesh = mp_face_mesh.FaceMesh(min_detection_confidence=0.2)
+
+# Function to calculate perceptual hash of an image
+def calculate_image_hash(image):
+    return imagehash.phash(image)
+
+# Function to extract face landmarks from an image
+def extract_face_landmarks(image):
+    image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+    results = face_mesh.process(image_rgb)
+    if results.multi_face_landmarks:
+        return [landmark for landmarks in results.multi_face_landmarks for landmark in landmarks.landmark]
+    return []
+
+# Function to check if the video is modified
+def check_video_modification(video_file, database_path='video_database.db'):
+    video_capture = cv2.VideoCapture(video_file)
+    frame_count = 0
+    hashes = set()
+    
+    while True:
+        ret, frame = video_capture.read()
+        if not ret:
+            break
+        
+        frame_count += 1
+        
+        # Convert the frame to a PIL Image for hashing
+        pil_image = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+        frame_hash = calculate_image_hash(pil_image)
+        hashes.add(str(frame_hash))
+        
+        # Extract face landmarks (optional)
+        extract_face_landmarks(frame)
+    
+    video_capture.release()
+    
+    # Connect to the database
+    conn = sqlite3.connect(database_path)
+    cursor = conn.cursor()
+    
+    # Check if the hashes exist in the database
+    all_hashes = set()
+    for frame_hash in hashes:
+        cursor.execute("SELECT hash FROM videos WHERE hash = ?", (frame_hash,))
+        result = cursor.fetchone()
+        if result:
+            all_hashes.add(frame_hash)
+    
+    conn.close()
+    
+    if hashes == all_hashes:
+        return "The video is original and matches the database."
+    else:
+        return "The video is modified."
+
+# Streamlit UI
+st.title("Video Modification Checker")
+
+uploaded_file = st.file_uploader("Upload a video", type=["mp4", "avi", "mov"])
+
+if uploaded_file is not None:
+    # Save the uploaded video temporarily
+    with tempfile.NamedTemporaryFile(delete=False) as temp_file:
+        temp_file.write(uploaded_file.read())
+        temp_file_path = temp_file.name
+    
+    # Check for modifications
+    result = check_video_modification(temp_file_path)
+    st.write(result)
