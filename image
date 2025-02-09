@@ -1,0 +1,55 @@
+import streamlit as st
+import sqlite3
+from PIL import Image
+import imagehash
+import io
+
+# Function to calculate perceptual hash of an image
+def calculate_image_hash(image):
+    return imagehash.phash(image)
+
+# Function to check if the provided image is modified or original
+def check_image_modification(user_image, database_path='image_database.db'):
+    user_image_hash = calculate_image_hash(user_image)
+    
+    # Connect to the database
+    conn = sqlite3.connect(database_path)
+    cursor = conn.cursor()
+    
+    # Query to find the image hash in the database
+    cursor.execute("SELECT hash FROM images WHERE hash = ?", (str(user_image_hash),))
+    result = cursor.fetchone()
+    
+    if result:
+        return "The image is original and exists in the database."
+    
+    # If no direct match is found, check for modifications
+    cursor.execute("SELECT hash FROM images")
+    all_hashes = cursor.fetchall()
+    
+    conn.close()
+    
+    # Convert hashes to string format and check similarity
+    for original_hash in all_hashes:
+        original_hash = imagehash.hex_to_hash(original_hash[0])
+        # Calculate the hamming distance to determine modification
+        if user_image_hash - original_hash < 5:  # Adjust threshold as needed
+            return "The image is modified."
+    
+    return "The image is modified and not found in the database."
+
+# Streamlit UI
+st.title("Image Modification Checker")
+
+uploaded_file = st.file_uploader("Upload an image", type=["jpg", "jpeg", "png"])
+
+if uploaded_file is not None:
+    # Open the uploaded image file
+    user_image = Image.open(uploaded_file)
+    
+    # Display the uploaded image
+    st.image(user_image, caption='Uploaded Image', use_column_width=True)
+    
+    # Check for modifications
+    result = check_image_modification(user_image)
+    st.write(result)
